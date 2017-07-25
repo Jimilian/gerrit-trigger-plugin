@@ -188,9 +188,34 @@ public final class DependencyQueueTaskDispatcher extends QueueTaskDispatcher
             return new BecauseDependentBuildIsBuilding(blockingProjects);
         } else {
             logger.info("No active dependencies on project: {} , it will now build", p);
+
+            ToGerritRunListener toGerritRunListener = ToGerritRunListener.getInstance();
+            if (toGerritRunListener != null) {
+                List<Run> parentRuns = toGerritRunListener.getRuns(event);
+
+                if (parentRuns == null) {
+                    logger.info("All dependencies on project: {}, are triggered in silent mode. "
+                            + "Can not get list of actual dependencies", p);
+                    return null;
+                }
+
+                List<Run> actualDependencies = new ArrayList<Run>(dependencies.size());
+                for (Run run : parentRuns) {
+                    if (dependencies.contains(run.getParent())) {
+                        actualDependencies.add(run);
+                    }
+                }
+
+                // TODO: returning `null` from a QueueTaskDispatcher does not mean the build will start immediately.
+                // So, this line can be called multiple times. In case of performance/stability issues it makes sense to
+                // mode to TransientActionFactory or maybe a QueueListener would be better.
+                item.replaceAction(new GerritDependencyAction(actualDependencies));
+            }
+
             return null;
         }
     }
+
 
     /**
      * Gets the subset of projects which have a building element needing to complete for the same event.
@@ -199,7 +224,7 @@ public final class DependencyQueueTaskDispatcher extends QueueTaskDispatcher
      * @return the sublist of dependencies which need to be completed before this event is resolved.
      */
     protected List<Job> getBlockingDependencyProjects(List<Job> dependencies,
-            GerritTriggeredEvent event) {
+                                                    GerritTriggeredEvent event) {
         List<Job> blockingProjects = new ArrayList<Job>();
         ToGerritRunListener toGerritRunListener = ToGerritRunListener.getInstance();
         if (toGerritRunListener != null) {
